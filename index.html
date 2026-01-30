@@ -1,20 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Porsche Traffic Racer - Neon City</title>
+    <title>Porsche 911 GT2 - Realismo HDR</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; }
-        .stat { font-size: 28px; font-weight: bold; text-shadow: 0 0 10px #0ff; margin-bottom: 5px; }
-        #hint { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #555; font-size: 14px; }
+        body { margin: 0; overflow: hidden; background: #000; }
+        #ui { position: absolute; top: 30px; left: 30px; color: #fff; font-family: 'Segoe UI', sans-serif; pointer-events: none; }
+        .kmh { font-size: 50px; font-weight: 800; color: #00ffff; text-shadow: 0 0 20px #00ffff; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="stat" id="speed">0 KM/H</div>
-        <div class="stat" id="score">DISTANZA: 0m</div>
+        <div id="speed" class="kmh">0</div>
+        <div style="font-size: 14px; opacity: 0.6;">KM/H</div>
     </div>
-    <div id="hint">W: Accelera | A-D: Sterza | SPACE: Drift</div>
 
     <script type="importmap">
         {
@@ -29,151 +27,99 @@
         import * as THREE from 'three';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-        // --- CONFIGURAZIONE ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.Fog(0x000000, 30, 200);
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // --- 1. AMBIENTE E RIFLESSI (Il segreto del realismo) ---
+        // Creiamo un "generatore di riflessi" per la vernice
+        const pmremGenerator = new THREE.PMREMGenerator(new THREE.WebGLRenderer());
+        scene.environment = pmremGenerator.fromScene(new THREE.Scene()).texture;
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; // Tone mapping cinematografico
+        renderer.toneMappingExposure = 1.2;
         document.body.appendChild(renderer.domElement);
 
-        // --- COSTANTI FISICA ---
-        const MAX_KMH = 240;
-        const NPC_KMH = 120;
-        let kmh = 0;
-        let score = 0;
-        let velocity = 0; // interna per Three.js
-        let steering = 0;
-        const keys = {};
-
-        // --- CARICAMENTO MODELLI ---
+        // --- 2. MATERIALE PORSCHE AVANZATO ---
+        let car = new THREE.Group();
         const loader = new OBJLoader();
-        let playerCar = new THREE.Group();
-        const npcCars = [];
-        const neonColors = [0xff00ff, 0x00ffff, 0xffff00, 0x00ff00, 0xff0000];
-
-        // Carica la TUA Porsche (Azzurra)
+        
         loader.load('Porsche_911_GT2.obj', (obj) => {
-            setupCar(obj, 0x00ffff, playerCar);
-            scene.add(playerCar);
-        });
-
-        function setupCar(obj, color, group) {
             const box = new THREE.Box3().setFromObject(obj);
             const size = box.getSize(new THREE.Vector3());
-            const center = box.getCenter(new THREE.Vector3());
-            obj.position.sub(center);
-            obj.position.y = size.y / 2; // Fix sotto terra
-            obj.traverse(child => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({ 
-                        color: color, emissive: color, emissiveIntensity: 0.4, metalness: 0.8, roughness: 0.2 
+            obj.position.y = size.y / 2; // Perfettamente a terra
+
+            obj.traverse(c => {
+                if (c.isMesh) {
+                    // Vernice metallizzata realistica
+                    c.material = new THREE.MeshPhysicalMaterial({ 
+                        color: 0x003366,       // Blu profondo (molto più realistico dell'azzurro neon)
+                        metalness: 1.0,        // Puro metallo
+                        roughness: 0.1,        // Superficie liscia
+                        clearcoat: 1.0,        // Strato di "lucido" sopra la vernice
+                        clearcoatRoughness: 0.05,
+                        reflectivity: 1.0
                     });
                 }
             });
-            group.add(obj);
-            group.scale.set(1.4, 1.4, 1.4);
-        }
+            car.add(obj);
+            car.scale.set(1.5, 1.5, 1.5);
+            scene.add(car);
+        });
 
-        // Creazione NPC (altre macchine)
-        function spawnNPC(zOffset) {
-            const group = new THREE.Group();
-            const color = neonColors[Math.floor(Math.random() * neonColors.length)];
-            loader.load('Porsche_911_GT2.obj', (obj) => {
-                setupCar(obj, color, group);
-            });
-            group.position.set((Math.random() - 0.5) * 20, 0, zOffset);
-            scene.add(group);
-            npcCars.push(group);
-        }
-
-        for(let i=1; i<=6; i++) spawnNPC(-i * 60);
-
-        // --- AMBIENTE ---
-        const road = new THREE.GridHelper(200, 12, 0xffffff, 0x222222);
-        scene.add(road);
-
-        const buildings = [];
-        for(let i=0; i<15; i++) {
-            const h = Math.random() * 50 + 10;
-            const b = new THREE.Mesh(
-                new THREE.BoxGeometry(10, h, 10),
-                new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true })
-            );
-            b.position.set(i % 2 ? -30 : 30, h/2, -i * 30);
-            scene.add(b);
-            buildings.push(b);
-        }
-
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        // --- 3. FISICA "SMOOTH" ---
+        let speed = 0, targetSpeed = 0, steer = 0;
+        const keys = {};
         window.onkeydown = (e) => keys[e.code] = true;
         window.onkeyup = (e) => keys[e.code] = false;
 
-        // --- LOOP LOGICA ---
-        function update() {
-            // 1. FISICA ACCELERAZIONE (0-100 in ~3s, 0-240 in ~10s)
-            if (keys['KeyW']) {
-                // L'accelerazione diminuisce all'aumentare della velocità
-                let accelForce = 0.003 * (1 - (kmh / (MAX_KMH + 20))); 
-                velocity += accelForce;
-            } else if (keys['KeyS']) {
-                velocity -= 0.005;
-            } else {
-                velocity *= 0.99; // Attrito naturale
-            }
-            
-            velocity = Math.max(0, Math.min(velocity, 0.8)); // Cap tecnico
-            kmh = (velocity / 0.8) * MAX_KMH;
+        // Strada con asfalto scuro e strisce neon
+        const roadGeo = new THREE.PlaneGeometry(30, 1000);
+        const roadMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.8 });
+        const road = new THREE.Mesh(roadGeo, roadMat);
+        road.rotation.x = -Math.PI / 2;
+        scene.add(road);
 
-            // 2. STERZO
-            const steerInput = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
-            steering = THREE.MathUtils.lerp(steering, steerInput * (velocity * 1.8), 0.1);
-            playerCar.position.x += steering;
-            playerCar.rotation.y = steering * 0.4;
-            playerCar.rotation.z = -steering * 0.2;
-            playerCar.position.x = THREE.MathUtils.clamp(playerCar.position.x, -14, 14);
-
-            // 3. MOVIMENTO MONDO E NPC
-            const worldSpeed = velocity * 15;
-            const npcVelocity = (NPC_KMH / MAX_KMH) * 0.8 * 15; // NPC vanno a 120 km/h
-
-            road.position.z = (road.position.z + worldSpeed) % 20;
-
-            buildings.forEach(b => {
-                b.position.z += worldSpeed;
-                if (b.position.z > 50) b.position.z -= 450;
-            });
-
-            npcCars.forEach(npc => {
-                // NPC si muovono alla loro velocità, ma noi li vediamo rispetto alla nostra
-                npc.position.z += (worldSpeed - npcVelocity);
-                
-                // Se l'NPC è troppo lontano dietro, respawn davanti
-                if (npc.position.z > 50) {
-                    npc.position.z = -350;
-                    npc.position.x = (Math.random() - 0.5) * 24;
-                }
-                // Se l'NPC lo sorpassiamo troppo velocemente davanti (es. siamo fermi)
-                if (npc.position.z < -400) npc.position.z = 50;
-
-                // Collisione semplice
-                if (playerCar.position.distanceTo(npc.position) < 4) {
-                    velocity *= 0.5; // Rallenta drasticamente all'urto
-                }
-            });
-
-            // 4. UI
-            score += velocity;
-            document.getElementById('speed').innerText = `${Math.floor(kmh)} KM/H`;
-            document.getElementById('score').innerText = `DISTANZA: ${Math.floor(score)}m`;
-
-            camera.position.set(playerCar.position.x * 0.5, 3, 8);
-            camera.lookAt(playerCar.position.x, 1, -10);
+        // Luci della città (punti luce che scorrono per creare riflessi sulla carrozzeria)
+        const lights = [];
+        for(let i=0; i<10; i++) {
+            const light = new THREE.PointLight(Math.random() > 0.5 ? 0x00ffff : 0xff00ff, 10, 50);
+            light.position.set(i % 2 ? -15 : 15, 5, -i * 50);
+            scene.add(light);
+            lights.push(light);
         }
 
         function animate() {
             requestAnimationFrame(animate);
-            update();
+
+            // Accelerazione realistica
+            if (keys['KeyW']) targetSpeed = Math.min(targetSpeed + 0.005, 1.0);
+            else targetSpeed *= 0.99;
+            
+            speed = THREE.MathUtils.lerp(speed, targetSpeed, 0.05);
+            
+            // Sterzo fluido
+            const steerInput = (keys['KeyA'] ? 0.04 : 0) - (keys['KeyD'] ? 0.04 : 0);
+            steer = THREE.MathUtils.lerp(steer, steerInput * speed, 0.1);
+            car.position.x += steer * 15;
+            car.rotation.y = steer * 10;
+            car.rotation.z = -steer * 5; // L'auto si imbarca dolcemente
+
+            // Scorrimento luci e strada per simulare il movimento
+            lights.forEach(l => {
+                l.position.z += speed * 50;
+                if(l.position.z > 20) l.position.z = -480;
+            });
+            road.position.z = (road.position.z + speed * 50) % 100;
+
+            // Update UI
+            document.getElementById('speed').innerText = Math.floor(speed * 240);
+
+            // Camera dinamica
+            camera.position.lerp(new THREE.Vector3(car.position.x * 0.5, 3.5, 10), 0.05);
+            camera.lookAt(car.position.x, 1, -20);
+
             renderer.render(scene, camera);
         }
         animate();
