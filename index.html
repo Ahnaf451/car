@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Porsche 911 GT2 Drive</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="ui">Usa <b>W, A, S, D</b> per guidare la Porsche</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+        // --- Configurazione Scena ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // Cielo azzurro
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Luci ---
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(5, 10, 7.5);
+        scene.add(sun);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // --- Variabili Gioco ---
+        let car;
+        const keys = { w: false, a: false, s: false, d: false };
+        let speed = 0;
+        let rotation = 0;
+
+        // --- Caricamento Modello Porsche ---
+        const loader = new OBJLoader();
+        loader.load('Porsche_911_GT2.obj', (obj) => {
+            car = obj;
+            car.scale.set(0.5, 0.5, 0.5); // Regola la scala se l'auto è troppo grande/piccola
+            scene.add(car);
+        }, undefined, (error) => {
+            console.error("Errore nel caricamento del file OBJ. Assicurati che sia nella stessa cartella.", error);
+            // Creiamo un cubo temporaneo se il file non viene trovato
+            const geo = new THREE.BoxGeometry(1, 0.5, 2);
+            const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            car = new THREE.Mesh(geo, mat);
+            scene.add(car);
+        });
+
+        // --- Strada Infinita con Curve (Semplificata) ---
+        const roadGeo = new THREE.PlaneGeometry(20, 1000);
+        const roadMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const road = new THREE.Mesh(roadGeo, roadMat);
+        road.rotation.x = -Math.PI / 2;
+        scene.add(road);
+
+        // --- Controlli ---
+        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+        // --- Ciclo di Animazione ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (car) {
+                // Logica di movimento
+                if (keys.w) speed += 0.01;
+                if (keys.s) speed -= 0.01;
+                if (keys.a) rotation += 0.03;
+                if (keys.d) rotation -= 0.03;
+
+                speed *= 0.95; // Attrito
+                
+                car.rotation.y = rotation;
+                car.position.z -= Math.cos(rotation) * speed;
+                car.position.x -= Math.sin(rotation) * speed;
+
+                // La telecamera segue l'auto
+                camera.position.set(
+                    car.position.x + Math.sin(rotation) * 5,
+                    car.position.y + 2,
+                    car.position.z + Math.cos(rotation) * 5
+                );
+                camera.lookAt(car.position);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Resize finestra
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
