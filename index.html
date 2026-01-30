@@ -1,15 +1,16 @@
 <!DOCTYPE html>
-<html lang="it">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Porsche 911 GT2 Drive</title>
+    <title>Porsche 911 GT2 - City Drive</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', sans-serif; }
+        #speedo { position: absolute; bottom: 20px; right: 20px; color: #00ff00; font-size: 30px; text-shadow: 0 0 10px #00ff00; }
+        #instructions { position: absolute; top: 20px; width: 100%; text-align: center; color: white; letter-spacing: 2px; }
     </style>
 </head>
 <body>
-    <div id="ui">Usa <b>W, A, S, D</b> per guidare la Porsche</div>
+    <div id="instructions">ESPLORA LA CITTÀ CON LA TUA PORSCHE (W-A-S-D)</div>
+    <div id="speedo">0 KM/H</div>
 
     <script type="importmap">
         {
@@ -24,81 +25,182 @@
         import * as THREE from 'three';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-        // --- Configurazione Scena ---
+        // SCENA E RENDERER
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb); // Cielo azzurro
+        scene.fog = new THREE.Fog(0x000000, 30, 150); // Nebbia aumentata per nascondere i bordi lontani
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
         document.body.appendChild(renderer.domElement);
 
-        // --- Luci ---
-        const sun = new THREE.DirectionalLight(0xffffff, 1);
-        sun.position.set(5, 10, 7.5);
+        // LUCI
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5); // Luce ambientale generale
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffffff, 2); // Sole/Luce principale
+        sun.position.set(10, 20, 10);
         scene.add(sun);
-        scene.add(new THREE.AmbientLight(0x404040));
 
-        // --- Variabili Gioco ---
-        let car;
-        const keys = { w: false, a: false, s: false, d: false };
-        let speed = 0;
-        let rotation = 0;
+        // TERRENO/ASFALTO DI BASE (per evitare il vuoto ai lati della strada)
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.1;
+        scene.add(ground);
 
-        // --- Caricamento Modello Porsche ---
-        const loader = new OBJLoader();
-        loader.load('Porsche_911_GT2.obj', (obj) => {
-            car = obj;
-            car.scale.set(0.5, 0.5, 0.5); // Regola la scala se l'auto è troppo grande/piccola
-            scene.add(car);
-        }, undefined, (error) => {
-            console.error("Errore nel caricamento del file OBJ. Assicurati che sia nella stessa cartella.", error);
-            // Creiamo un cubo temporaneo se il file non viene trovato
-            const geo = new THREE.BoxGeometry(1, 0.5, 2);
-            const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-            car = new THREE.Mesh(geo, mat);
-            scene.add(car);
-        });
+        // CREAZIONE STRADA SEMPLIFICATA CON CURVE E CORSIE
+        const roadWidth = 8; // Larghezza della strada
+        const laneWidth = 1; // Larghezza delle strisce
+        const laneCount = 3; // Numero di corsie visibili
 
-        // --- Strada Infinita con Curve (Semplificata) ---
-        const roadGeo = new THREE.PlaneGeometry(20, 1000);
-        const roadMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
-        const road = new THREE.Mesh(roadGeo, roadMat);
-        road.rotation.x = -Math.PI / 2;
-        scene.add(road);
+        const trackPoints = [];
+        for (let i = 0; i < 200; i++) { // Strada più lunga
+            const x = Math.sin(i * 0.1) * 15; // Curve più morbide e larghe
+            const z = -i * 10;
+            trackPoints.push(new THREE.Vector3(x, 0, z));
+        }
+        const curve = new THREE.CatmullRomCurve3(trackPoints);
 
-        // --- Controlli ---
-        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
-        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+        // Geometria della strada principale
+        const roadGeometry = new THREE.BufferGeometry();
+        const vertices = [];
+        const divisions = trackPoints.length * 5; // Aumentiamo le divisioni per una strada più fluida
 
-        // --- Ciclo di Animazione ---
-        function animate() {
-            requestAnimationFrame(animate);
+        for (let i = 0; i < divisions; i++) {
+            const t = i / (divisions - 1);
+            const point = curve.getPointAt(t);
+            const tangent = curve.getTangentAt(t).normalize();
+            const binormal = new THREE.Vector3().crossVectors(camera.up, tangent).normalize();
 
-            if (car) {
-                // Logica di movimento
-                if (keys.w) speed += 0.01;
-                if (keys.s) speed -= 0.01;
-                if (keys.a) rotation += 0.03;
-                if (keys.d) rotation -= 0.03;
+            // Punti per la larghezza della strada
+            const leftPoint = new THREE.Vector3().copy(point).add(binormal.clone().multiplyScalar(-roadWidth / 2));
+            const rightPoint = new THREE.Vector3().copy(point).add(binormal.clone().multiplyScalar(roadWidth / 2));
 
-                speed *= 0.95; // Attrito
-                
-                car.rotation.y = rotation;
-                car.position.z -= Math.cos(rotation) * speed;
-                car.position.x -= Math.sin(rotation) * speed;
-
-                // La telecamera segue l'auto
-                camera.position.set(
-                    car.position.x + Math.sin(rotation) * 5,
-                    car.position.y + 2,
-                    car.position.z + Math.cos(rotation) * 5
-                );
-                camera.lookAt(car.position);
-            }
-
-            renderer.render(scene, camera);
+            vertices.push(leftPoint.x, leftPoint.y, leftPoint.z);
+            vertices.push(rightPoint.x, rightPoint.y, rightPoint.z);
         }
 
+        roadGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, side: THREE.DoubleSide });
+        const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+        scene.add(roadMesh);
+
+
+        // Strisce delle corsie (generate sopra la strada)
+        const laneMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00 }); // Strisce gialle
+        for (let j = 0; j < laneCount -1; j++) {
+            const laneStripGeo = new THREE.TubeGeometry(curve, 200, 0.1, 4, false); // Striscia sottile
+            const laneStrip = new THREE.Mesh(laneStripGeo, laneMaterial);
+            laneStrip.scale.set(roadWidth / laneCount - (roadWidth/2 - j*roadWidth/laneCount), 0.1, 1); // Posiziona le strisce
+            laneStrip.position.y = 0.05; // Leggermente sopra la strada
+            scene.add(laneStrip);
+        }
+        
+
+        // EDIFICI SEMPLIFICATI (blocchi ai lati della strada)
+        const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.1, roughness: 0.9 });
+        for (let i = 0; i < trackPoints.length; i++) {
+            const point = trackPoints[i];
+            const tangent = curve.getTangentAt(i / (trackPoints.length - 1)).normalize();
+            const binormal = new THREE.Vector3().crossVectors(camera.up, tangent).normalize();
+
+            // Edifici a sinistra
+            if (i % 5 === 0) { // Non su ogni punto per non avere troppi edifici
+                const buildingHeight = Math.random() * 20 + 5;
+                const buildingWidth = Math.random() * 5 + 3;
+                const buildingDepth = Math.random() * 5 + 3;
+
+                const buildingGeo = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+                const building = new THREE.Mesh(buildingGeo, buildingMaterial);
+
+                const offset = binormal.clone().multiplyScalar(-roadWidth / 2 - buildingWidth / 2 - Math.random() * 5); // Spostato a lato
+                building.position.copy(point).add(offset);
+                building.position.y = buildingHeight / 2;
+                scene.add(building);
+            }
+            // Edifici a destra
+            if (i % 7 === 0) { // Non su ogni punto per non avere troppi edifici
+                const buildingHeight = Math.random() * 25 + 8;
+                const buildingWidth = Math.random() * 6 + 4;
+                const buildingDepth = Math.random() * 6 + 4;
+
+                const buildingGeo = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+                const building = new THREE.Mesh(buildingGeo, buildingMaterial);
+
+                const offset = binormal.clone().multiplyScalar(roadWidth / 2 + buildingWidth / 2 + Math.random() * 5); // Spostato a lato
+                building.position.copy(point).add(offset);
+                building.position.y = buildingHeight / 2;
+                scene.add(building);
+            }
+        }
+
+        // CARICAMENTO PORSCHE CON MATERIALE METALLICO
+        let car = new THREE.Group();
+        const loader = new OBJLoader();
+        loader.load('Porsche_911_GT2.obj', (obj) => {
+            obj.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0xd10000, // Rosso Porsche
+                        metalness: 0.8,
+                        roughness: 0.2
+                    });
+                }
+            });
+            car.add(obj);
+            obj.scale.set(0.6, 0.6, 0.6);
+            obj.rotation.y = Math.PI; // Gira l'auto nel verso giusto
+        }, undefined, (error) => {
+            console.error("Errore nel caricamento del file OBJ:", error);
+            const geo = new THREE.BoxGeometry(1.5, 0.8, 3);
+            const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            car.add(new THREE.Mesh(geo, mat));
+            car.children[0].position.y = 0.4;
+        });
+        scene.add(car);
+
+        // LOGICA DI MOVIMENTO E FISICA
+        const keys = {};
+        let speed = 0;
+        let angle = 0;
+        const maxSpeed = 0.2;
+        const acceleration = 0.002;
+        const deceleration = 0.003;
+        const handling = 0.005; // Quanto è sensibile lo sterzo
+
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        function updatePhysics() {
+            // Accelerazione / Decelerazione
+            if (keys['KeyW']) speed = Math.min(speed + acceleration, maxSpeed);
+            else if (keys['KeyS']) speed = Math.max(speed - deceleration, -maxSpeed / 2); // Retromarcia più lenta
+            else speed *= 0.97; // Attrito se non si premono i tasti
+
+            // Sterzo
+            if (keys['KeyA']) angle += handling * speed;
+            if (keys['KeyD']) angle -= handling * speed;
+
+            // Movimento dell'auto
+            car.position.z -= Math.cos(angle) * speed;
+            car.position.x -= Math.sin(angle) * speed;
+            car.rotation.y = angle + Math.PI;
+
+            // Tachimetro
+            document.getElementById('speedo').innerText = Math.abs(Math.round(speed * 1000)) + " KM/H";
+
+            // Camera follow
+            const camOffset = new THREE.Vector3(Math.sin(angle) * 8, 3, Math.cos(angle) * 8);
+            camera.position.lerp(car.position.clone().add(camOffset), 0.1);
+            camera.lookAt(car.position);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+            renderer.render(scene, camera);
+        }
         animate();
 
         // Resize finestra
