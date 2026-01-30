@@ -1,53 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Neon Traffic Race - Porsche Edition</title>
+    <title>Porsche 911 Neon - Realistic Physics</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Press Start 2P', cursive; }
-        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-        #speedo { position: absolute; bottom: 20px; right: 20px; color: #00ff00; font-size: 24px; text-shadow: 0 0 15px #00ff00; }
-        #score { position: absolute; top: 20px; left: 20px; color: #ff00ff; font-size: 24px; text-shadow: 0 0 15px #ff00ff; }
-        #instructions { position: absolute; top: 20px; width: 100%; text-align: center; color: white; letter-spacing: 2px; font-size: 16px; }
-        #game-over {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: #ff0000;
-            font-size: 48px;
-            text-shadow: 0 0 20px #ff0000;
-            display: none; /* Nascosto all'inizio */
-            text-align: center;
-        }
-        #restart-button {
-            display: none;
-            position: absolute;
-            top: 65%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            padding: 15px 30px;
-            background-color: #00aaff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 20px;
-            cursor: pointer;
-            box-shadow: 0 0 15px #00aaff;
-            transition: background-color 0.3s, box-shadow 0.3s;
-        }
-        #restart-button:hover {
-            background-color: #0077cc;
-            box-shadow: 0 0 25px #00aaff;
-        }
+        body { margin: 0; overflow: hidden; background: #000; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; font-family: 'Courier New', monospace; }
+        .stat { font-size: 20px; text-shadow: 0 0 10px #0ff; }
     </style>
 </head>
 <body>
-    <div id="instructions">W - ACCELERA | A/D - STERZA | S - FRENA | SPAZIO - DRIFT</div>
-    <div id="speedo">0 KM/H</div>
-    <div id="score">SCORE: 0</div>
-    <div id="game-over">GAME OVER!<br><span style="font-size: 24px;">Hai totalizzato <span id="final-score">0</span> punti</span></div>
-    <button id="restart-button">RIGIOCA</button>
+    <div id="ui">
+        <div class="stat" id="speed">KM/H: 0</div>
+        <div class="stat" id="score">PUNTI: 0</div>
+    </div>
 
     <script type="importmap">
         {
@@ -62,389 +27,147 @@
         import * as THREE from 'three';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-        // --- Variabili di Gioco Globali ---
-        let scene, camera, renderer;
-        let car, carMixer; // carMixer per animazioni future se il modello lo supporta
-        let keys = {};
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x000000, 20, 200);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        // --- FISICA ---
+        let car = new THREE.Group();
         let speed = 0;
-        let angle = 0;
-        let score = 0;
-        let gameOver = false;
-        let lastZ = 0; // Per la generazione della strada
+        let lateralVelocity = 0; // Per rendere la curva fluida
+        let rotationTarget = 0;
+        const maxSpeed = 0.8; // Velocità massima bilanciata
+        const accel = 0.005;
+        const friction = 0.96; // Attrito per non farla scivolare all'infinito
+        const keys = {};
 
-        const maxSpeed = 1.2; // Velocità massima aumentata
-        const accelerationRate = 0.008;
-        const decelerationRate = 0.012;
-        const friction = 0.985;
-        const handling = 0.005;
-        const driftFactor = 0.03; // Quanto l'auto scivola lateralmente
-        const roadWidth = 20; // Larghezza strada 4 corsie (20 unità = 4 corsie da 5 unità)
-        const laneMarkLength = 4;
-        const laneMarkGap = 6;
-        const carSize = { x: 2, y: 1.5, z: 4.5 }; // Stima dimensione auto per collisioni
-        const otherCars = [];
-        const otherCarMaxCount = 30; // Numero massimo di auto in strada
-        const carSpawnZDistance = 200; // Distanza massima per spawnare auto davanti
-        const carDespawnZDistance = 30; // Distanza minima per despawnare auto dietro
-        const spawnInterval = 50; // Quanti frame tra uno spawn e l'altro
-        let spawnCounter = 0;
-
-        // Colori Neon per edifici e auto traffico
-        const neonColors = [
-            new THREE.Color(0xFF00FF), // Magenta
-            new THREE.Color(0x00FFFF), // Ciano
-            new THREE.Color(0xFFFF00), // Giallo
-            new THREE.Color(0xFF0000), // Rosso
-            new THREE.Color(0x00FF00), // Verde
-            new THREE.Color(0x0000FF), // Blu
-            new THREE.Color(0xFF69B4)  // Rosa acceso
-        ];
-        const playerCarColor = new THREE.Color(0x00FFFF); // Porsche azzurra
-
-
-        // --- Funzione per inizializzare il gioco ---
-        function init() {
-            // Reset variabili di gioco
-            score = 0;
-            gameOver = false;
-            speed = 0;
-            angle = 0;
-            lastZ = 0;
-            otherCars.forEach(c => scene.remove(c));
-            otherCars.length = 0; // Svuota l'array delle auto
-
-            // UI
-            document.getElementById('game-over').style.display = 'none';
-            document.getElementById('restart-button').style.display = 'none';
-            document.getElementById('score').innerText = 'SCORE: 0';
-            document.getElementById('instructions').style.display = 'block';
-
-
-            // SCENA, CAMERA, RENDERER
-            scene = new THREE.Scene();
-            scene.fog = new THREE.Fog(0x000000, 50, 250); // Nebbia aumentata per effetto infinito
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.toneMapping = THREE.ReinhardToneMapping;
-            renderer.toneMappingExposure = 1.5; // Esposizione per il neon
-            document.body.appendChild(renderer.domElement);
-
-            // LUCI
-            const ambient = new THREE.AmbientLight(0x444444, 0.8); // Luce ambientale generale
-            scene.add(ambient);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5); // Leggera luce direzionale per i volumi
-            directionalLight.position.set(0, 10, 0);
-            scene.add(directionalLight);
-
-            // Luce per la Porsche
-            const pointLight = new THREE.PointLight(0x00ffff, 2, 50); // Luce azzurra sulla Porsche
-            pointLight.position.set(0, 2, 0);
-            car = new THREE.Group(); // Contenitore per la Porsche
-            car.add(pointLight); // La luce seguirà la Porsche
-            scene.add(car);
-
-            // Caricamento della Porsche del Giocatore
-            const loader = new OBJLoader();
-            loader.load('Porsche_911_GT2.obj', (obj) => {
-                obj.traverse((child) => {
-                    if (child.isMesh) {
-                        child.material = new THREE.MeshStandardMaterial({
-                            color: playerCarColor, // Azzurra
-                            emissive: playerCarColor, // La porsche emette luce
-                            emissiveIntensity: 0.5,
-                            metalness: 0.8,
-                            roughness: 0.2
-                        });
-                    }
-                });
-                car.add(obj);
-                obj.scale.set(0.6, 0.6, 0.6);
-                obj.rotation.y = Math.PI; // Gira l'auto nel verso giusto
-            }, undefined, (error) => {
-                console.error("Errore nel caricamento del file OBJ della Porsche:", error);
-                // Fallback a un cubo se il modello non carica
-                const geo = new THREE.BoxGeometry(carSize.x, carSize.y, carSize.z);
-                const mat = new THREE.MeshBasicMaterial({ color: playerCarColor });
-                car.add(new THREE.Mesh(geo, mat));
-                car.children[0].position.y = carSize.y / 2;
+        // --- CARICAMENTO PORSCHE ---
+        const loader = new OBJLoader();
+        loader.load('Porsche_911_GT2.obj', (obj) => {
+            const box = new THREE.Box3().setFromObject(obj);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            
+            obj.position.sub(center); 
+            // SOLUZIONE SOTTO TERRA: Alza l'auto di metà della sua altezza
+            obj.position.y = size.y / 2; 
+            
+            obj.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0x00aaff,
+                        emissive: 0x0055ff,
+                        emissiveIntensity: 0.3,
+                        metalness: 0.9,
+                        roughness: 0.2
+                    });
+                }
             });
-            car.position.z = -5; // Partenza un po' più avanti
+            car.add(obj);
+            car.scale.set(1.5, 1.5, 1.5);
+        });
+        scene.add(car);
 
-            // Event Listener
-            document.removeEventListener('keydown', handleKeyDown);
-            document.removeEventListener('keyup', handleKeyUp);
-            document.addEventListener('keydown', handleKeyDown);
-            document.addEventListener('keyup', handleKeyUp);
+        // --- AMBIENTE ---
+        const roadGroup = new THREE.Group();
+        scene.add(roadGroup);
+        const roads = [];
+        const buildings = [];
 
-            // Inizia il ciclo di animazione
-            animate();
-        }
+        function createSection(z) {
+            // Strada 4 corsie
+            const roadGeo = new THREE.PlaneGeometry(30, 100);
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.z = z;
+            
+            // Striscia bianca
+            const line = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 100), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            line.position.y = 0.05;
+            road.add(line);
+            
+            roadGroup.add(road);
+            roads.push(road);
 
-        // --- Funzioni per la gestione degli eventi ---
-        function handleKeyDown(e) {
-            keys[e.code] = true;
-        }
-
-        function handleKeyUp(e) {
-            keys[e.code] = false;
-        }
-
-        // --- Funzioni di generazione ---
-
-        // Genera un segmento di strada (asfalto e strisce)
-        function generateRoadSegment(zOffset) {
-            const segmentLength = 20; // Lunghezza di ogni segmento stradale
-
-            // Asfalto
-            const asphaltGeo = new THREE.PlaneGeometry(roadWidth, segmentLength);
-            const asphaltMat = new THREE.MeshBasicMaterial({ color: 0x111111 }); // Asfalto nero
-            const asphalt = new THREE.Mesh(asphaltGeo, asphaltMat);
-            asphalt.rotation.x = -Math.PI / 2;
-            asphalt.position.z = zOffset - segmentLength / 2;
-            scene.add(asphalt);
-
-            // Strisce Bianche (4 corsie, 3 strisce centrali)
-            const laneMarkMat = new THREE.MeshBasicMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.8 });
-            const numLaneMarks = 3;
-            const laneSeparation = roadWidth / 4; // Ogni corsia è larga roadWidth/4
-
-            for (let i = 0; i < numLaneMarks; i++) {
-                const markX = -roadWidth / 2 + (i + 1) * laneSeparation;
-                const markCount = segmentLength / (laneMarkLength + laneMarkGap);
-                for (let j = 0; j < markCount; j++) {
-                    const markZ = zOffset - segmentLength / 2 + j * (laneMarkLength + laneMarkGap);
-                    const markGeo = new THREE.PlaneGeometry(0.5, laneMarkLength); // Striscia sottile
-                    const mark = new THREE.Mesh(markGeo, laneMarkMat);
-                    mark.rotation.x = -Math.PI / 2;
-                    mark.position.set(markX, 0.01, markZ); // Leggermente sopra l'asfalto
-                    scene.add(mark);
-                }
+            // Palazzi Neon
+            for(let i=0; i<4; i++) {
+                const h = Math.random() * 50 + 10;
+                const bGeo = new THREE.BoxGeometry(10, h, 10);
+                const color = [0xff00ff, 0xff0055, 0x00ffff][Math.floor(Math.random()*3)];
+                const bMat = new THREE.MeshBasicMaterial({ color, wireframe: true });
+                const b = new THREE.Mesh(bGeo, bMat);
+                b.position.set(i < 2 ? -25 : 25, h/2, z + (i*20) - 50);
+                scene.add(b);
+                buildings.push(b);
             }
         }
 
-        // Genera edifici neon
-        function generateBuildings(zOffset) {
-            const buildingBlockLength = 50; // Lunghezza del blocco di edifici
-            const buildingDensity = 5; // Quanti edifici per lato in un blocco
+        for(let i=0; i<5; i++) createSection(-i * 100);
 
-            for (let i = 0; i < buildingDensity; i++) {
-                // Lato sinistro
-                const heightLeft = Math.random() * 30 + 10;
-                const widthLeft = Math.random() * 8 + 5;
-                const depthLeft = Math.random() * 8 + 5;
-                const colorLeft = neonColors[Math.floor(Math.random() * neonColors.length)];
+        // --- LUCI ---
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        const spot = new THREE.SpotLight(0x00ffff, 2);
+        spot.position.set(0, 10, 5);
+        scene.add(spot);
 
-                const buildingLeftGeo = new THREE.BoxGeometry(widthLeft, heightLeft, depthLeft);
-                const buildingLeftMat = new THREE.MeshBasicMaterial({ color: colorLeft, emissive: colorLeft, emissiveIntensity: 1.0 });
-                const buildingLeft = new THREE.Mesh(buildingLeftGeo, buildingLeftMat);
-                buildingLeft.position.set(
-                    -roadWidth / 2 - widthLeft / 2 - Math.random() * 10,
-                    heightLeft / 2,
-                    zOffset - buildingBlockLength / 2 + Math.random() * buildingBlockLength
-                );
-                scene.add(buildingLeft);
+        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeyup = (e) => keys[e.code] = false;
 
-                // Lato destro
-                const heightRight = Math.random() * 30 + 10;
-                const widthRight = Math.random() * 8 + 5;
-                const depthRight = Math.random() * 8 + 5;
-                const colorRight = neonColors[Math.floor(Math.random() * neonColors.length)];
-
-                const buildingRightGeo = new THREE.BoxGeometry(widthRight, heightRight, depthRight);
-                const buildingRightMat = new THREE.MeshBasicMaterial({ color: colorRight, emissive: colorRight, emissiveIntensity: 1.0 });
-                const buildingRight = new THREE.Mesh(buildingRightGeo, buildingRightMat);
-                buildingRight.position.set(
-                    roadWidth / 2 + widthRight / 2 + Math.random() * 10,
-                    heightRight / 2,
-                    zOffset - buildingBlockLength / 2 + Math.random() * buildingBlockLength
-                );
-                scene.add(buildingRight);
-            }
-        }
-
-        // Genera un'altra Porsche casuale per il traffico
-        function spawnOtherCar() {
-            if (otherCars.length >= otherCarMaxCount) return;
-
-            const spawnZ = car.position.z - carSpawnZDistance; // Spawn lontano davanti
-            const lane = Math.floor(Math.random() * 4); // 0, 1, 2, 3
-            const spawnX = -roadWidth / 2 + (lane * (roadWidth / 4)) + (roadWidth / 8); // Centro della corsia
-            const carColor = neonColors[Math.floor(Math.random() * neonColors.length)];
-
-            const otherCarGroup = new THREE.Group();
-            const loader = new OBJLoader();
-            loader.load('Porsche_911_GT2.obj', (obj) => {
-                obj.traverse((child) => {
-                    if (child.isMesh) {
-                        child.material = new THREE.MeshStandardMaterial({
-                            color: carColor,
-                            emissive: carColor,
-                            emissiveIntensity: 0.7, // Meno intensa della tua auto
-                            metalness: 0.7,
-                            roughness: 0.3
-                        });
-                    }
-                });
-                otherCarGroup.add(obj);
-                obj.scale.set(0.6, 0.6, 0.6);
-                obj.rotation.y = Math.PI;
-            }, undefined, (error) => {
-                // Fallback a un cubo
-                const geo = new THREE.BoxGeometry(carSize.x, carSize.y, carSize.z);
-                const mat = new THREE.MeshBasicMaterial({ color: carColor });
-                otherCarGroup.add(new THREE.Mesh(geo, mat));
-                otherCarGroup.children[0].position.y = carSize.y / 2;
-            });
-
-            otherCarGroup.position.set(spawnX, 0, spawnZ);
-            otherCarGroup.speed = Math.random() * 0.05 + 0.1; // Velocità variabile per le auto del traffico
-            scene.add(otherCarGroup);
-            otherCars.push(otherCarGroup);
-        }
-
-        // --- Logica di gioco ---
-        function updateGame() {
-            if (gameOver) return;
-
-            // Fisica della tua Porsche
-            if (keys['KeyW']) speed = Math.min(speed + accelerationRate, maxSpeed);
-            else if (keys['KeyS']) speed = Math.max(speed - decelerationRate, -maxSpeed / 2);
-            else speed *= friction; // Attrito
-
-            if (keys['KeyA']) {
-                angle += handling * speed;
-                if (keys['Space']) { // Drift a sinistra
-                    car.position.x = Math.max(car.position.x - driftFactor * speed * 5, -roadWidth / 2 + carSize.x / 2);
-                }
-            }
-            if (keys['KeyD']) {
-                angle -= handling * speed;
-                if (keys['Space']) { // Drift a destra
-                    car.position.x = Math.min(car.position.x + driftFactor * speed * 5, roadWidth / 2 - carSize.x / 2);
-                }
-            }
-
-            // Limita la Porsche alla strada
-            car.position.x = Math.max(-roadWidth / 2 + carSize.x / 2, Math.min(roadWidth / 2 - carSize.x / 2, car.position.x));
-
-            // Movimento dell'auto
-            car.position.z -= Math.cos(angle) * speed;
-            car.position.x -= Math.sin(angle) * speed;
-            car.rotation.y = angle + Math.PI;
-
-            // --- Generazione e Pulizia Loop Infinito ---
-            // Genera nuovi segmenti di strada e edifici
-            const currentCarZ = car.position.z;
-            while (lastZ > currentCarZ - 150) { // Genera strada e edifici fino a 150 unità dietro la macchina
-                generateRoadSegment(lastZ);
-                generateBuildings(lastZ);
-                lastZ -= 20; // Ogni segmento è lungo 20 unità
-            }
-
-            // Rimuovi oggetti troppo lontani dietro
-            scene.children = scene.children.filter(obj => {
-                if (obj.isMesh && obj.position.z > currentCarZ + 50) { // Oggetti 50 unità davanti (già passati)
-                    obj.geometry.dispose();
-                    obj.material.dispose();
-                    return false;
-                }
-                return true;
-            });
-
-            // Gestione auto traffico
-            spawnCounter++;
-            if (spawnCounter >= spawnInterval) {
-                spawnOtherCar();
-                spawnCounter = 0;
-            }
-
-            for (let i = 0; i < otherCars.length; i++) {
-                const otherCar = otherCars[i];
-                otherCar.position.z += otherCar.speed; // Le auto del traffico si muovono verso di te (o sono più lente)
-
-                // Rimuovi auto traffico troppo lontane
-                if (otherCar.position.z > currentCarZ + carDespawnZDistance) {
-                    scene.remove(otherCar);
-                    otherCars.splice(i, 1);
-                    i--;
-                    continue;
-                }
-
-                // Collisione
-                if (checkCollision(car, otherCar)) {
-                    gameOver = true;
-                    endGame();
-                    return;
-                }
-            }
-
-            // Aggiorna score (basato sulla distanza percorsa)
-            score = Math.floor(Math.abs(currentCarZ) / 10); // 1 punto ogni 10 unità di distanza
-            document.getElementById('score').innerText = 'SCORE: ' + score;
-
-            // Aggiorna Tachimetro
-            document.getElementById('speedo').innerText = Math.abs(Math.round(speed * 1000)) + " KM/H";
-
-            // Camera follow
-            const camOffset = new THREE.Vector3(Math.sin(angle) * 8, 3, Math.cos(angle) * 8);
-            camera.position.lerp(car.position.clone().add(camOffset), 0.1);
-            camera.lookAt(car.position);
-        }
-
-        // --- Funzione di Controllo Collisioni ---
-        function checkCollision(carA, carB) {
-            // Semplice bounding box collision
-            const boxA = new THREE.Box3().setFromObject(carA);
-            const boxB = new THREE.Box3().setFromObject(carB);
-            return boxA.intersectsBox(boxB);
-        }
-
-        // --- Fine Gioco ---
-        function endGame() {
-            document.getElementById('game-over').style.display = 'block';
-            document.getElementById('final-score').innerText = score;
-            document.getElementById('restart-button').style.display = 'block';
-            document.getElementById('instructions').style.display = 'none';
-
-            // Ferma l'auto del giocatore
-            speed = 0;
-            // Potresti aggiungere un'animazione di esplosione qui
-        }
-
-        // --- Ciclo di Animazione Principale ---
         function animate() {
-            if (!gameOver) {
-                requestAnimationFrame(animate);
-                updateGame();
+            requestAnimationFrame(animate);
+
+            if (car.children.length > 0) {
+                // Accelerazione
+                if (keys['KeyW']) speed = Math.min(speed + accel, maxSpeed);
+                else if (keys['KeyS']) speed = Math.max(speed - accel, -maxSpeed/2);
+                else speed *= friction;
+
+                // Sterzo con inerzia
+                if (keys['KeyA']) lateralVelocity -= 0.01;
+                if (keys['KeyD']) lateralVelocity += 0.01;
+                
+                lateralVelocity *= 0.9; // Smorzamento laterale
+                car.position.x += lateralVelocity * (speed + 0.1); 
+
+                // Rotazione estetica (la macchina si "inclina" o "punta" verso la curva)
+                car.rotation.y = -lateralVelocity * 0.5;
+                car.rotation.z = -lateralVelocity * 0.2; // Rollio
+
+                // Drift con spazio
+                if (keys['Space']) {
+                    car.rotation.y *= 2.5;
+                    lateralVelocity *= 1.05;
+                }
+
+                // Limiti strada
+                car.position.x = Math.max(-13, Math.min(13, car.position.x));
+
+                // Scorrimento infinito
+                roadGroup.position.z += speed * 20;
+                buildings.forEach(b => b.position.z += speed * 20);
+
+                // Riciclo strada
+                if (roadGroup.position.z > 100) {
+                    roadGroup.position.z = 0;
+                    buildings.forEach(b => { if(b.position.z > 50) b.position.z -= 500; });
+                }
+
+                // Camera follow fluida
+                camera.position.set(car.position.x * 0.5, 3.5, 8);
+                camera.lookAt(car.position.x, 1, -10);
+
+                document.getElementById('speed').innerText = `KM/H: ${Math.floor(speed * 350)}`;
             }
+
             renderer.render(scene, camera);
         }
-
-        // --- Listener per il bottone di restart ---
-        document.getElementById('restart-button').addEventListener('click', () => {
-            // Pulisci la scena completamente prima di reinizializzare
-            while(scene.children.length > 0){
-                const obj = scene.children[0];
-                if(obj.geometry) obj.geometry.dispose();
-                if(obj.material) obj.material.dispose();
-                scene.remove(obj);
-            }
-            // Rimuovi il renderer e ricrealo per pulizia completa del contesto WebGL
-            document.body.removeChild(renderer.domElement);
-            init();
-        });
-
-
-        // Inizializza il gioco al caricamento
-        init();
-
-        // Resize finestra
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        animate();
     </script>
 </body>
 </html>
