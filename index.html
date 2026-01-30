@@ -1,18 +1,20 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Porsche 911 Neon - Realistic Physics</title>
+    <title>Porsche Traffic Racer - Neon City</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; font-family: 'Courier New', monospace; }
-        .stat { font-size: 20px; text-shadow: 0 0 10px #0ff; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; }
+        .stat { font-size: 28px; font-weight: bold; text-shadow: 0 0 10px #0ff; margin-bottom: 5px; }
+        #hint { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #555; font-size: 14px; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="stat" id="speed">KM/H: 0</div>
-        <div class="stat" id="score">PUNTI: 0</div>
+        <div class="stat" id="speed">0 KM/H</div>
+        <div class="stat" id="score">DISTANZA: 0m</div>
     </div>
+    <div id="hint">W: Accelera | A-D: Sterza | SPACE: Drift</div>
 
     <script type="importmap">
         {
@@ -27,144 +29,151 @@
         import * as THREE from 'three';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
+        // --- CONFIGURAZIONE ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.Fog(0x000000, 20, 200);
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        scene.fog = new THREE.Fog(0x000000, 30, 200);
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.toneMapping = THREE.ReinhardToneMapping;
         document.body.appendChild(renderer.domElement);
 
-        // --- FISICA ---
-        let car = new THREE.Group();
-        let speed = 0;
-        let lateralVelocity = 0; // Per rendere la curva fluida
-        let rotationTarget = 0;
-        const maxSpeed = 0.8; // Velocità massima bilanciata
-        const accel = 0.005;
-        const friction = 0.96; // Attrito per non farla scivolare all'infinito
+        // --- COSTANTI FISICA ---
+        const MAX_KMH = 240;
+        const NPC_KMH = 120;
+        let kmh = 0;
+        let score = 0;
+        let velocity = 0; // interna per Three.js
+        let steering = 0;
         const keys = {};
 
-        // --- CARICAMENTO PORSCHE ---
+        // --- CARICAMENTO MODELLI ---
         const loader = new OBJLoader();
+        let playerCar = new THREE.Group();
+        const npcCars = [];
+        const neonColors = [0xff00ff, 0x00ffff, 0xffff00, 0x00ff00, 0xff0000];
+
+        // Carica la TUA Porsche (Azzurra)
         loader.load('Porsche_911_GT2.obj', (obj) => {
+            setupCar(obj, 0x00ffff, playerCar);
+            scene.add(playerCar);
+        });
+
+        function setupCar(obj, color, group) {
             const box = new THREE.Box3().setFromObject(obj);
             const size = box.getSize(new THREE.Vector3());
             const center = box.getCenter(new THREE.Vector3());
-            
-            obj.position.sub(center); 
-            // SOLUZIONE SOTTO TERRA: Alza l'auto di metà della sua altezza
-            obj.position.y = size.y / 2; 
-            
-            obj.traverse((child) => {
+            obj.position.sub(center);
+            obj.position.y = size.y / 2; // Fix sotto terra
+            obj.traverse(child => {
                 if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        color: 0x00aaff,
-                        emissive: 0x0055ff,
-                        emissiveIntensity: 0.3,
-                        metalness: 0.9,
-                        roughness: 0.2
+                    child.material = new THREE.MeshStandardMaterial({ 
+                        color: color, emissive: color, emissiveIntensity: 0.4, metalness: 0.8, roughness: 0.2 
                     });
                 }
             });
-            car.add(obj);
-            car.scale.set(1.5, 1.5, 1.5);
-        });
-        scene.add(car);
-
-        // --- AMBIENTE ---
-        const roadGroup = new THREE.Group();
-        scene.add(roadGroup);
-        const roads = [];
-        const buildings = [];
-
-        function createSection(z) {
-            // Strada 4 corsie
-            const roadGeo = new THREE.PlaneGeometry(30, 100);
-            const roadMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a });
-            const road = new THREE.Mesh(roadGeo, roadMat);
-            road.rotation.x = -Math.PI / 2;
-            road.position.z = z;
-            
-            // Striscia bianca
-            const line = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 100), new THREE.MeshBasicMaterial({color: 0xffffff}));
-            line.position.y = 0.05;
-            road.add(line);
-            
-            roadGroup.add(road);
-            roads.push(road);
-
-            // Palazzi Neon
-            for(let i=0; i<4; i++) {
-                const h = Math.random() * 50 + 10;
-                const bGeo = new THREE.BoxGeometry(10, h, 10);
-                const color = [0xff00ff, 0xff0055, 0x00ffff][Math.floor(Math.random()*3)];
-                const bMat = new THREE.MeshBasicMaterial({ color, wireframe: true });
-                const b = new THREE.Mesh(bGeo, bMat);
-                b.position.set(i < 2 ? -25 : 25, h/2, z + (i*20) - 50);
-                scene.add(b);
-                buildings.push(b);
-            }
+            group.add(obj);
+            group.scale.set(1.4, 1.4, 1.4);
         }
 
-        for(let i=0; i<5; i++) createSection(-i * 100);
+        // Creazione NPC (altre macchine)
+        function spawnNPC(zOffset) {
+            const group = new THREE.Group();
+            const color = neonColors[Math.floor(Math.random() * neonColors.length)];
+            loader.load('Porsche_911_GT2.obj', (obj) => {
+                setupCar(obj, color, group);
+            });
+            group.position.set((Math.random() - 0.5) * 20, 0, zOffset);
+            scene.add(group);
+            npcCars.push(group);
+        }
 
-        // --- LUCI ---
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        const spot = new THREE.SpotLight(0x00ffff, 2);
-        spot.position.set(0, 10, 5);
-        scene.add(spot);
+        for(let i=1; i<=6; i++) spawnNPC(-i * 60);
 
+        // --- AMBIENTE ---
+        const road = new THREE.GridHelper(200, 12, 0xffffff, 0x222222);
+        scene.add(road);
+
+        const buildings = [];
+        for(let i=0; i<15; i++) {
+            const h = Math.random() * 50 + 10;
+            const b = new THREE.Mesh(
+                new THREE.BoxGeometry(10, h, 10),
+                new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true })
+            );
+            b.position.set(i % 2 ? -30 : 30, h/2, -i * 30);
+            scene.add(b);
+            buildings.push(b);
+        }
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
         window.onkeydown = (e) => keys[e.code] = true;
         window.onkeyup = (e) => keys[e.code] = false;
 
+        // --- LOOP LOGICA ---
+        function update() {
+            // 1. FISICA ACCELERAZIONE (0-100 in ~3s, 0-240 in ~10s)
+            if (keys['KeyW']) {
+                // L'accelerazione diminuisce all'aumentare della velocità
+                let accelForce = 0.003 * (1 - (kmh / (MAX_KMH + 20))); 
+                velocity += accelForce;
+            } else if (keys['KeyS']) {
+                velocity -= 0.005;
+            } else {
+                velocity *= 0.99; // Attrito naturale
+            }
+            
+            velocity = Math.max(0, Math.min(velocity, 0.8)); // Cap tecnico
+            kmh = (velocity / 0.8) * MAX_KMH;
+
+            // 2. STERZO
+            const steerInput = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
+            steering = THREE.MathUtils.lerp(steering, steerInput * (velocity * 1.8), 0.1);
+            playerCar.position.x += steering;
+            playerCar.rotation.y = steering * 0.4;
+            playerCar.rotation.z = -steering * 0.2;
+            playerCar.position.x = THREE.MathUtils.clamp(playerCar.position.x, -14, 14);
+
+            // 3. MOVIMENTO MONDO E NPC
+            const worldSpeed = velocity * 15;
+            const npcVelocity = (NPC_KMH / MAX_KMH) * 0.8 * 15; // NPC vanno a 120 km/h
+
+            road.position.z = (road.position.z + worldSpeed) % 20;
+
+            buildings.forEach(b => {
+                b.position.z += worldSpeed;
+                if (b.position.z > 50) b.position.z -= 450;
+            });
+
+            npcCars.forEach(npc => {
+                // NPC si muovono alla loro velocità, ma noi li vediamo rispetto alla nostra
+                npc.position.z += (worldSpeed - npcVelocity);
+                
+                // Se l'NPC è troppo lontano dietro, respawn davanti
+                if (npc.position.z > 50) {
+                    npc.position.z = -350;
+                    npc.position.x = (Math.random() - 0.5) * 24;
+                }
+                // Se l'NPC lo sorpassiamo troppo velocemente davanti (es. siamo fermi)
+                if (npc.position.z < -400) npc.position.z = 50;
+
+                // Collisione semplice
+                if (playerCar.position.distanceTo(npc.position) < 4) {
+                    velocity *= 0.5; // Rallenta drasticamente all'urto
+                }
+            });
+
+            // 4. UI
+            score += velocity;
+            document.getElementById('speed').innerText = `${Math.floor(kmh)} KM/H`;
+            document.getElementById('score').innerText = `DISTANZA: ${Math.floor(score)}m`;
+
+            camera.position.set(playerCar.position.x * 0.5, 3, 8);
+            camera.lookAt(playerCar.position.x, 1, -10);
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-
-            if (car.children.length > 0) {
-                // Accelerazione
-                if (keys['KeyW']) speed = Math.min(speed + accel, maxSpeed);
-                else if (keys['KeyS']) speed = Math.max(speed - accel, -maxSpeed/2);
-                else speed *= friction;
-
-                // Sterzo con inerzia
-                if (keys['KeyA']) lateralVelocity -= 0.01;
-                if (keys['KeyD']) lateralVelocity += 0.01;
-                
-                lateralVelocity *= 0.9; // Smorzamento laterale
-                car.position.x += lateralVelocity * (speed + 0.1); 
-
-                // Rotazione estetica (la macchina si "inclina" o "punta" verso la curva)
-                car.rotation.y = -lateralVelocity * 0.5;
-                car.rotation.z = -lateralVelocity * 0.2; // Rollio
-
-                // Drift con spazio
-                if (keys['Space']) {
-                    car.rotation.y *= 2.5;
-                    lateralVelocity *= 1.05;
-                }
-
-                // Limiti strada
-                car.position.x = Math.max(-13, Math.min(13, car.position.x));
-
-                // Scorrimento infinito
-                roadGroup.position.z += speed * 20;
-                buildings.forEach(b => b.position.z += speed * 20);
-
-                // Riciclo strada
-                if (roadGroup.position.z > 100) {
-                    roadGroup.position.z = 0;
-                    buildings.forEach(b => { if(b.position.z > 50) b.position.z -= 500; });
-                }
-
-                // Camera follow fluida
-                camera.position.set(car.position.x * 0.5, 3.5, 8);
-                camera.lookAt(car.position.x, 1, -10);
-
-                document.getElementById('speed').innerText = `KM/H: ${Math.floor(speed * 350)}`;
-            }
-
+            update();
             renderer.render(scene, camera);
         }
         animate();
